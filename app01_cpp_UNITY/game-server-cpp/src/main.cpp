@@ -18,13 +18,12 @@ void Expect(bool condition, const char* what) {
     }
 }
 
-void SendInput(NetworkServer& server, int clientId, uint32_t seq, float x, float y) {
-    PlayerInputPacket packet{seq, x, y, false};
+void SendInput(NetworkServer& server, int clientId, uint32_t seq, float x, float y, bool shoot = false) {
+    PlayerInputPacket packet{seq, x, y, shoot};
     server.HandleIncomingPacket(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet), clientId);
 }
 
-// Offline self-test of the validation gates and authoritative state (no socket needed).
-int RunSelfTest(NetworkServer& server) {
+void TestValidationAndMovement(NetworkServer& server) {
     const float step = PLAYER_SPEED * TICK_SECONDS;
 
     SendInput(server, 1, 1, 1.0f, 0.0f);
@@ -47,7 +46,39 @@ int RunSelfTest(NetworkServer& server) {
     }
     p1 = server.GetPlayerState(1);
     Expect(p1 && p1->positionX == ARENA_HALF_EXTENT, "position clamps at arena bound");
+}
 
+void TestCombat() {
+    NetworkServer server;
+
+    // Target moves 10 steps right; shooter takes one step right behind it.
+    for (uint32_t seq = 1; seq <= 10; ++seq) {
+        SendInput(server, 20, seq, 1.0f, 0.0f);
+    }
+    SendInput(server, 10, 1, 1.0f, 0.0f);
+
+    SendInput(server, 10, 2, 1.0f, 0.0f, /*shoot=*/true);
+    const PlayerState* target = server.GetPlayerState(20);
+    Expect(target && target->health == MAX_HEALTH - SHOT_DAMAGE, "shot along facing damages target");
+
+    for (uint32_t seq = 3; seq <= 5; ++seq) {
+        SendInput(server, 10, seq, 0.0f, 0.0f, /*shoot=*/true);
+    }
+    target = server.GetPlayerState(20);
+    Expect(target && target->health == MAX_HEALTH &&
+               target->positionX == 0.0f && target->positionY == 0.0f,
+           "fourth hit kills and respawns target at origin");
+
+    // Respawned target is behind the shooter now — the next shot must miss.
+    SendInput(server, 10, 6, 0.0f, 0.0f, /*shoot=*/true);
+    target = server.GetPlayerState(20);
+    Expect(target && target->health == MAX_HEALTH, "shot misses target behind the shooter");
+}
+
+// Offline self-test of the validation gates and authoritative state (no socket needed).
+int RunSelfTest(NetworkServer& server) {
+    TestValidationAndMovement(server);
+    TestCombat();
     std::cout << (failures == 0 ? "self-test OK" : "self-test FAILED") << std::endl;
     return failures == 0 ? 0 : 1;
 }

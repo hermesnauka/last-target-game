@@ -9,7 +9,7 @@ Full PRD/threat model/SDLC phases: see `SSDLC_Unity_CPP_Shooter_Plan.md` in this
 
 ## Invariants
 - The C++ server is the sole authority on positions/health/hits (SR-1). Client scripts must only ever send input, never coordinates.
-- `PlayerInputPacket` in `NetworkServer.h` and `NetworkClient.cs` must stay byte-identical (`Pack = 1` / same field order) — it's memcpy'd directly off the wire.
+- Wire structs (`PlayerInputPacket`, `PlayerStatePacket`) in `NetworkServer.h` and `NetworkClient.cs` must stay byte-identical (`#pragma pack(1)` / `Pack = 1`, same field order) — they're memcpy'd directly off the wire. The `static_assert`s on their sizes in `NetworkServer.h` are the tripwire; update both sides together.
 - Every packet handler validates size and input bounds before touching game state (see `NetworkServer::HandleIncomingPacket`).
 
 ## Build & test the server

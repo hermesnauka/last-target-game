@@ -1,7 +1,6 @@
 #include "NetworkServer.h"
 
 #include <arpa/inet.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -12,6 +11,8 @@
 #include <iostream>
 
 void NetworkServer::HandleIncomingPacket(const uint8_t* rawBuffer, size_t bufferSize, int clientId) {
+    lastShotVictim_ = -1;
+
     // SECURITY GATE: Prevent Buffer Overflow/Underflow
     if (bufferSize != sizeof(PlayerInputPacket)) {
         std::cerr << "Security Alert: Invalid packet size from client " << clientId << std::endl;
@@ -76,6 +77,17 @@ int NetworkServer::Run(uint16_t port) {
 
     std::cout << "Listening on udp://127.0.0.1:" << port << std::endl;
 
+    auto broadcastState = [this, sock](int playerId) {
+        const PlayerState* state = GetPlayerState(playerId);
+        if (!state) return;
+        PlayerStatePacket snapshot{static_cast<uint32_t>(playerId), state->lastProcessedSequence,
+                                   state->positionX, state->positionY, state->health};
+        for (const auto& [id, addr] : clientAddrs_) {
+            sendto(sock, &snapshot, sizeof(snapshot), 0,
+                   reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+        }
+    };
+
     uint8_t buffer[MAX_PACKET_SIZE];
 
     while (true) {
@@ -95,15 +107,14 @@ int NetworkServer::Run(uint16_t port) {
 
         // Client identity is IP:port until session tokens land (see STRIDE/Spoofing).
         int clientId = static_cast<int>(ntohs(sender.sin_port));
+        clientAddrs_[clientId] = sender;
         HandleIncomingPacket(buffer, static_cast<size_t>(received), clientId);
 
-        // Correction path (User Story 2): the reply always carries the server's
-        // authoritative state — a rejected input still gets the unchanged snapshot.
-        if (const PlayerState* state = GetPlayerState(clientId)) {
-            PlayerStatePacket snapshot{state->lastProcessedSequence,
-                                       state->positionX, state->positionY, state->health};
-            sendto(sock, &snapshot, sizeof(snapshot), 0,
-                   reinterpret_cast<const sockaddr*>(&sender), senderLen);
+        // FR-3 + correction path: everyone gets the sender's authoritative state;
+        // a rejected input still broadcasts the unchanged snapshot.
+        broadcastState(clientId);
+        if (lastShotVictim_ >= 0) {
+            broadcastState(lastShotVictim_);
         }
     }
 }
@@ -122,6 +133,54 @@ void NetworkServer::ProcessPlayerLogic(int clientId, const PlayerInputPacket& pa
                                  -ARENA_HALF_EXTENT, ARENA_HALF_EXTENT);
     state.positionY = std::clamp(state.positionY + packet.movementY * PLAYER_SPEED * TICK_SECONDS,
                                  -ARENA_HALF_EXTENT, ARENA_HALF_EXTENT);
+
+    float magnitude = std::sqrt(packet.movementX * packet.movementX +
+                                packet.movementY * packet.movementY);
+    if (magnitude > 0.0f) {
+        state.facingX = packet.movementX / magnitude;
+        state.facingY = packet.movementY / magnitude;
+    }
+
+    if (packet.isShooting) {
+        lastShotVictim_ = ResolveShot(clientId);
+    }
+}
+
+int NetworkServer::ResolveShot(int shooterId) {
+    const PlayerState& shooter = players_[shooterId];
+
+    int victimId = -1;
+    float closest = SHOT_RANGE + 1.0f;
+    for (auto& [id, target] : players_) {
+        if (id == shooterId) continue;
+
+        float dx = target.positionX - shooter.positionX;
+        float dy = target.positionY - shooter.positionY;
+        float along = dx * shooter.facingX + dy * shooter.facingY; // distance along the shot ray
+        if (along <= 0.0f || along > SHOT_RANGE) continue;
+
+        float perpendicular = std::abs(dx * shooter.facingY - dy * shooter.facingX);
+        if (perpendicular > HITBOX_RADIUS) continue;
+
+        if (along < closest) {
+            closest = along;
+            victimId = id;
+        }
+    }
+
+    if (victimId >= 0) {
+        PlayerState& victim = players_[victimId];
+        victim.health -= SHOT_DAMAGE;
+        std::cout << "Hit: " << shooterId << " -> " << victimId
+                  << " (health " << victim.health << ")" << std::endl;
+        if (victim.health <= 0) {
+            std::cout << "Kill: " << shooterId << " eliminated " << victimId << std::endl;
+            victim.positionX = 0.0f;
+            victim.positionY = 0.0f;
+            victim.health = MAX_HEALTH;
+        }
+    }
+    return victimId;
 }
 
 void NetworkServer::DropClient(int /*clientId*/) { /* Disconnect logic */ }

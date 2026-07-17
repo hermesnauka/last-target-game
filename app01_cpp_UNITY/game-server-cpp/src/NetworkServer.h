@@ -1,5 +1,7 @@
 #pragma once
 
+#include <netinet/in.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
@@ -9,10 +11,15 @@ constexpr size_t MAX_PACKET_SIZE = 512;
 // SR-4: per-IP rate limit — max packets per fixed 1-second window.
 constexpr uint32_t MAX_PACKETS_PER_SECOND = 60;
 
-// SR-1: all movement math lives server-side. Units per simulated tick.
+// SR-1: all movement and combat math lives server-side. Units per simulated tick.
 constexpr float PLAYER_SPEED = 5.0f;
 constexpr float TICK_SECONDS = 1.0f / 60.0f;
 constexpr float ARENA_HALF_EXTENT = 100.0f; // arena spans [-100, 100] on both axes
+
+constexpr float SHOT_RANGE = 50.0f;
+constexpr float HITBOX_RADIUS = 0.5f;
+constexpr int32_t SHOT_DAMAGE = 25;
+constexpr int32_t MAX_HEALTH = 100;
 
 // Wire formats shared with the Unity client (NetworkClient.cs, Pack = 1).
 // Must stay byte-identical: little-endian, no padding.
@@ -24,8 +31,9 @@ struct PlayerInputPacket {
     bool isShooting;
 };
 
-// Authoritative snapshot sent back to the client (correction path, User Story 2).
+// Authoritative snapshot broadcast to every client (FR-3, User Story 2).
 struct PlayerStatePacket {
+    uint32_t playerId;
     uint32_t lastProcessedSequence;
     float positionX;
     float positionY;
@@ -33,12 +41,14 @@ struct PlayerStatePacket {
 };
 #pragma pack(pop)
 static_assert(sizeof(PlayerInputPacket) == 13, "wire format must match the C# Pack=1 layout");
-static_assert(sizeof(PlayerStatePacket) == 16, "wire format must match the C# Pack=1 layout");
+static_assert(sizeof(PlayerStatePacket) == 20, "wire format must match the C# Pack=1 layout");
 
 struct PlayerState {
     float positionX = 0.0f;
     float positionY = 0.0f;
-    int32_t health = 100;
+    float facingX = 1.0f; // last non-zero movement direction, normalized
+    float facingY = 0.0f;
+    int32_t health = MAX_HEALTH;
     uint32_t lastProcessedSequence = 0;
 };
 
@@ -54,6 +64,11 @@ public:
 
 private:
     void ProcessPlayerLogic(int clientId, const PlayerInputPacket& packet);
+
+    // Authoritative hit-scan from the shooter's position along its facing.
+    // Returns the victim's clientId, or -1 on miss.
+    int ResolveShot(int shooterId);
+
     void DropClient(int clientId);
     void FlagCheater(int clientId);
 
@@ -67,4 +82,8 @@ private:
     };
     std::unordered_map<uint32_t, RateWindow> rateWindows_;
     std::unordered_map<int, PlayerState> players_;
+    std::unordered_map<int, sockaddr_in> clientAddrs_; // for FR-3 broadcast
+
+    // Victim of the most recent processed packet's shot (-1 if none); consumed by Run.
+    int lastShotVictim_ = -1;
 };
