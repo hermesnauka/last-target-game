@@ -10,3 +10,9 @@ add_executable(game_server_cpp
 )
 
 target_include_directories(game_server_cpp PRIVATE src include)
+
+# Phase 4 SAST gate: warnings are errors, GCC analyzer always on.
+target_compile_options(game_server_cpp PRIVATE
+    -Wall -Wextra -Wpedantic -Werror
+    $<$<CXX_COMPILER_ID:GNU>:-fanalyzer>
+)

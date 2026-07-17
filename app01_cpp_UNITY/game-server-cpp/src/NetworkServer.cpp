@@ -124,6 +124,6 @@ void NetworkServer::ProcessPlayerLogic(int clientId, const PlayerInputPacket& pa
                                  -ARENA_HALF_EXTENT, ARENA_HALF_EXTENT);
 }
 
-void NetworkServer::DropClient(int clientId) { /* Disconnect logic */ }
+void NetworkServer::DropClient(int /*clientId*/) { /* Disconnect logic */ }
 
-void NetworkServer::FlagCheater(int clientId) { /* Logging and banning logic */ }
+void NetworkServer::FlagCheater(int /*clientId*/) { /* Logging and banning logic */ }

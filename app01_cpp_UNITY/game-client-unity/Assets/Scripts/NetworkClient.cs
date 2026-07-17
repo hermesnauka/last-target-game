@@ -13,6 +13,16 @@ public class NetworkClient : MonoBehaviour
         public byte isShooting; // Using byte for reliable cross-platform serialization
     }
 
+    // Authoritative snapshot from the C++ server (16 bytes, matches PlayerStatePacket)
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct PlayerStatePacket
+    {
+        public uint lastProcessedSequence;
+        public float positionX;
+        public float positionY;
+        public int health;
+    }
+
     private uint seqCounter = 0;
 
     void Update()
