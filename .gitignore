@@ -9,6 +9,11 @@ cmake-build-*/
 *.o
 *.obj
 
+######### C# / .NET (game-server-csharp)
+[Bb]in/
+[Oo]bj/
+*.user
+
 ######### Unity (game-client-unity)
 [Ll]ibrary/
 [Tt]emp/
