@@ -16,5 +16,6 @@ Full PRD/threat model/SDLC phases: see `SSDLC_Unity_CPP_Shooter_Plan.md` in this
 ```
 cmake -S game-server-cpp -B game-server-cpp/build
 cmake --build game-server-cpp/build
-./game-server-cpp/build/game_server_cpp
+./game-server-cpp/build/game_server_cpp                  # offline self-test of validation gates
+./game-server-cpp/build/game_server_cpp --listen 47777   # UDP loop (loopback-only until DTLS, SR-2)
 ```
